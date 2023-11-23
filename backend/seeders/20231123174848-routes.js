@@ -3,7 +3,7 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {
-    const route_csv = require('./routes')
+    const route_csv = require('../csv_seeds/routes')
     const csvArray = require('../functions/csvArray')
 
     const seed = csvArray(route_csv)
