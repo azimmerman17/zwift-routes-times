@@ -5,10 +5,10 @@ require('dotenv').config()
 const getAccessToken = require('../functions/getAccessToken')         // Gets Access Token
 const getActivitiesList = require('../functions/getActivitiesList')   // Gets Activity List
 const getActivityData = require('../functions/getActivityData')       // Gets Activity Data
-const runQuery = require('../functions/runQuery')                     // runs Querys
-const generateMap = require('../functions/generateMap')
-// get Segment Data
-const translateDate = require('../functions/translateDate')           // translate Strava Date
+const runQuery = require('../functions/runQuery')                     // Runs Querys
+const generateMap = require('../functions/generateMap')               // Creates a Map from Queried Data
+const getSegmentData = require('../functions/getSegmentData')         // Get Segment Data
+const translateDate = require('../functions/translateDate')           // Translate Strava Date
 
 // Check PR time update tables
 
@@ -16,6 +16,7 @@ router.post('/seed_prs', async (req, res) => {
   // return variables
   let activityCount = 0   // total number of activities processed
   let segmentCount = 0    // total number of segments processed
+  let countUpdated = 0    // total number of segment effort counts updated
 
   // Step 1 - Retrieve Access Token
   console.log('Step 1 - Retrieve Access Token')
@@ -33,7 +34,7 @@ router.post('/seed_prs', async (req, res) => {
   // Step 3 - Get and process each activity data from Strava API and update Zwift_PR and Yearly PR tables
   console.log(`Step 3 - Get and process each activity data from Strava API and update Zwift_PR and Yearly PR tables\nEstimated time ${activityCount / 3.5} minutes`)
   // for (let i = 0; i < activityList.length; i++) {
-  for (let i = 0; i < 1; i++) {
+  for (let i = 0; i < activityList.length; i++) {
     // Step 3 Part 1 - Get the activity data from Strava
     console.log(`Processing activity ${i + 1} of ${activityList.length}; Activity: ${activityList[i]}`)
     const activityData = await getActivityData(access_token, activityList[i])
@@ -187,9 +188,48 @@ router.post('/seed_prs', async (req, res) => {
 
   // Step 4 - Update the Segment Effort Counts
   // Step 4 Part 1- Get a list of strava_ids with PR data attached
+  const selectQuery = `SELECT A.strava_id
+  FROM public."Zwift_PRs" A
+  WHERE A.pr_time is not null`
+
+  const segmentList = await runQuery(selectQuery)
+  countUpdated = segmentList.length
+  console.log(`${countUpdated} segments that need to be updated `)
+  
   // Step 4 Part 2 - Loop through the rows to get a segment effort count
-  // Step 4 Part 3 - Update the Zwift_PR Table
-  // Step 4 Part 4 = Pause for Rate Limit
+  for (let k = 0; k < segmentList.length; k++) {
+    let stravaId = segmentList[k][`strava_id`]
+    const segmentData = await getSegmentData(stravaId, access_token)
+    const { athlete_segment_stats } = segmentData
+    const { effort_count } = athlete_segment_stats
+    console.log('\n Athlete Stats\n', athlete_segment_stats)
+
+    // Step 4 Part 3 - Update the Zwift_PR Table
+    const updateQuery = `UPDATE public."Zwift_PRs"
+      SET count = ${effort_count},
+        updated_at = NOW()
+      WHERE strava_id = ${stravaId}`
+
+    console.log('\nYEARLY PR Upate Query - Updating Count\n', updateQuery)
+    await runQuery(updateQuery)
+
+    // Step 4 Part 4 = Pause for Rate Limit
+    console.log(`Updated Count for Segment ${stravaId} - Segment ${k + 1} of ${countUpdated}`)
+    console.log('Pausing for 15 seconds due to Strava API call limits')
+    await new Promise(r => setTimeout(r, 15000));
+  }       // end loop Update Counts
+  // end the process
+  console.log('Process Complete- Seed Zwift_PR Table and Yearly_PR Table\n', {
+    activityCount,
+    segmentCount,
+    countUpdated
+  })
+
+  res.send({
+    activityCount,
+    segmentCount,
+    countUpdated
+  })
 })
 
 module.exports = router
