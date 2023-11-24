@@ -10,7 +10,11 @@ app.use(cors())
 app.use(express.static('public'))
 app.use(express.urlencoded({ extended: true }))
 
+// controllers
+const processController = require('./controllers/processses')
 
+
+app.use('/process', processController)
 
 //Listening on Port
 app.listen(process.env.PORT, () => {
