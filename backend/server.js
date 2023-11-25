@@ -1,7 +1,7 @@
 require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
-const pg = require('pg')
+const bodyParser = require('body-parser')
 
 const app = express();
 
@@ -9,12 +9,14 @@ const app = express();
 app.use(cors())
 app.use(express.static('public'))
 app.use(express.urlencoded({ extended: true }))
+app.use(bodyParser.json())
 
 // controllers
 const processController = require('./controllers/processses')
-
+const routesController = require('./controllers/routes')
 
 app.use('/process', processController)
+app.use('/routes', routesController)
 
 //Listening on Port
 app.listen(process.env.PORT, () => {
