@@ -1,4 +1,4 @@
-// translates Zwift World from id to name
+// translates Zwift World from name to id
 
 function translateZwiftWorld(world) {
   let name = world.toLowerCase()
