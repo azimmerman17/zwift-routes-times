@@ -5,6 +5,7 @@ require('dotenv').config()
 const runQuery = require('../functions/runQuery')       // Runs Querys
 const generateMap = require('../functions/generateMap')
 const calcAvgGrade = require('../functions/calcAvgGrade')
+const calcClimbCat = require('../functions/calcClimbCat')
 
 // GET
 // GET all routes
@@ -157,7 +158,7 @@ router.put('/:id', async (req,res) => {
   WHERE strava_id = ${id}`
 
   const currData = runQuery(selectQuery)
-  const dataMap = generateMap(currData)
+  const dataMap = generateMap(currData[0])
 
   let newLength = length || dataMap.get('length')
   let newEle = ele_gain || dataMap.get('ele_gain')
@@ -201,6 +202,7 @@ router.put('/strava/:id', async (req,res) => {
     // Update the Zwift_PRs Table - remove effort data
     const prQuery = `UPDATE public."Zwift_PRs"
       SET strava_id = ${strava_id},
+        count = null,
         last_effort_time = null,
         last_effort_date = null,
         pr_time = null,
@@ -219,7 +221,7 @@ router.put('/strava/:id', async (req,res) => {
     // Remove all instances from the Yearly_PR table
     const yearQuery = `DELETE FROM public."Yearly_PRs" 
       WHERE strava_id = ${id};`
-    await runQuery(deleteYearlyQuery)
+    await runQuery(yearQuery)
     // Do not seed the tables, seed in bulk due to API call restrictions
   }
   res.status(200).send('Complete')
@@ -229,8 +231,8 @@ router.put('/strava/:id', async (req,res) => {
 // DELETE a route 
 router.delete('/:id', async (req, res) => {
   const { id } = req.params
-  // remove segment from Routes Table
-  const deleteRoutesQuery = `DELETE FROM public."Routes" 
+  // remove segment from Segments Table
+  const deleteRoutesQuery = `DELETE FROM public."Segments" 
     WHERE strava_id = ${id};`
   await runQuery(deleteRoutesQuery)
   
@@ -239,7 +241,7 @@ router.delete('/:id', async (req, res) => {
     WHERE strava_id = ${id};`
   await runQuery(deletePRQuery)
 
-  // remove segment from Zwift_PR Table
+  // remove segment from Yearly_PR Table
   const deleteYearlyQuery = `DELETE FROM public."Yearly_PRs" 
     WHERE strava_id = ${id};`
   await runQuery(deleteYearlyQuery)

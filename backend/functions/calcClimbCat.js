@@ -14,4 +14,4 @@ function calcClimbCat(l, e) {
   else return 'NC'
 }
 
-modules.export = calcClimbCat
+module.exports = calcClimbCat

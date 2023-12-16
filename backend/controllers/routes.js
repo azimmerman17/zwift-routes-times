@@ -173,6 +173,7 @@ router.put('/strava/:id', async (req,res) => {
     // Update the Zwift_PRs Table - remove effort data
     const prQuery = `UPDATE public."Zwift_PRs"
       SET strava_id = ${strava_id},
+        count = null,
         last_effort_time = null,
         last_effort_date = null,
         pr_time = null,

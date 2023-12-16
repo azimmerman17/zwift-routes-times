@@ -12,7 +12,6 @@ module.exports = {
       },
       strava_id: {
         allowNull: false,
-        primaryKey: true,
         type: Sequelize.BIGINT
       },
       year: {

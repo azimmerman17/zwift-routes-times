@@ -14,9 +14,12 @@ app.use(bodyParser.json())
 // controllers
 const processController = require('./controllers/processses')
 const routesController = require('./controllers/routes')
+const portalController = require('./controllers/climb_portal')
 
 app.use('/process', processController)
 app.use('/routes', routesController)
+app.use('/climb', portalController)
+
 
 //Listening on Port
 app.listen(process.env.PORT, () => {

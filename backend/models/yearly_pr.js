@@ -22,7 +22,6 @@ module.exports = (sequelize, DataTypes) => {
     },
     strava_id: {
       type: DataTypes.INTEGER,
-      primaryKey: true,
       allowNull: false
     },
     year: {
