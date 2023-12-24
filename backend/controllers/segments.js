@@ -34,7 +34,8 @@ router.get('/', async (req, res) => {
 
   try {
     const segments = await runQuery(selectQuery)
-    res.status(200).send(segments)
+    if (segments.error) res.status(500).send({segments, table: 'Segments'})
+    else res.status(200).send(segments)
   } catch (error) {
     res.status(500).send(error)
   }
@@ -61,28 +62,37 @@ router.get('/:id', async (req, res) => {
       B.silver_time,
       B.silver_date,
       B.bronze_time,
-      B.bronze_date,
+      B.bronze_date
     FROM public."Segments" A
     LEFT JOIN public."Zwift_PRs" B
       ON A.strava_id = B.strava_id
     WHERE A.strava_id = ${Number(id) ? id : null}
       OR A.zi_link = '${id.toLowerCase()}';`
 
-  const selectYearQuery = `SELECT A.strava_id,
-      A.year,
-      A.pr_time as yr_pr_time,
-      A.pr_date as yr_pr_date
-    FROM public."Yearly_PRs" A
-    WHERE A.strava_id = ${Number(id) ? id : null}
-      OR A.zi_link = '${id.toLowerCase()}';`
-
   try {
     const segment = await runQuery(selectQuery)
-    const year = await runQuery(selectYearQuery)
-    res.status(200).send({
-      segment,
-      year
-    })
+    
+    if (segment === null) res.status(404).send('Invaild Segment')
+    else if (segment.error)  res.status(500).send({segment, table: 'Segment'})
+    else {
+      const { strava_id } = segment[0]
+      
+      const selectYearQuery = `SELECT A.strava_id,
+          A.year,
+          A.pr_time as yr_pr_time,
+          A.pr_date as yr_pr_date
+        FROM public."Yearly_PRs" A
+        WHERE A.strava_id = ${Number(id) ? id : strava_id};`
+
+      const year = await runQuery(selectYearQuery)
+      if (year.error) res.status(500).send({year, table: 'Yearly_PRs'})
+      else {
+        res.status(200).send({
+          segment,
+          year
+        })
+      }
+    }
   } catch (error) {
     res.status(500).send(error)
   }
@@ -91,59 +101,67 @@ router.get('/:id', async (req, res) => {
 // POST
 // POST A NEW ROUTE
 router.post('/', async (req, res) => {
-    // Validate the required data is present
-    const { strava_id, segment_name, zi_link, world_id, length, ele_gain, type, avg_grade } = req.body
-    if (type === 'KOM') {
-      if (!strava_id,!segment_name, !zi_link, !world_id, !length, !type, !ele_gain) res.status(400).send('Invalid request - Required fields not entered')
-
-      const komQuery =`INSERT INTO public."Segments" ( strava_id, segment_name, zi_link, world_id, length, ele_gain, grade, climb_cat, type, createdAt, updatedAt)
+  // Validate the required data is present
+  const { strava_id, segment_name, zi_link, world_id, length, ele_gain, type, avg_grade } = req.body
+  if (type === 'KOM') {
+    if (!strava_id,!segment_name, !zi_link, !world_id, !length, !type, !ele_gain) res.status(400).send('Invalid request - Required fields not entered')
+    else {
+      const komQuery =`INSERT INTO public."Segments" ( strava_id, segment_name, zi_link, world_id, length, ele_gain, grade, climb_cat, type, created_at, updated_at)
       VALUES (${strava_id},
-        ${segment_name},
-        ${zi_link},
+        '${segment_name}',
+        '${zi_link}',
         ${world_id},
-        ${length},
-        ${ele_gain},
+        ${Number(length).toFixed(2)},
+        ${Math.floor(ele_gain)},
         ${calcAvgGrade(length, ele_gain)},
         ${calcClimbCat(length,ele_gain)},
         'kom',
         NOW(),
         NOW());`
 
-      await runQuery(komQuery)
-
-      // POST to ZWIFT_PR TABLE
-      const prQuery = `INSERT INTO public."Zwift_PRS" (strava_id, type, createdAt, updatedAt)
-        VALUES (${strava_id},
-          'segment',
-          NOW(),
-          NOW());`
-      await runQuery(prQuery)
-    } else {
-      if (!segment_name, !zi_link, !world_id, !length, !type) res.status(400).send('Invalid request - Required fields not entered')
-
+      let result = await runQuery(komQuery)
+      if (result.error) res.status(500).send({result, table: 'Segments'})
+      else {
+        // POST to ZWIFT_PR TABLE
+        const prQuery = `INSERT INTO public."Zwift_PRs" (strava_id, type, created_at, updated_at)
+          VALUES (${strava_id},
+            'segment',
+            NOW(),
+            NOW());`
+        result = await runQuery(prQuery)
+        if (result.error) res.status(500).send({result, table: 'Zwift_PRs'})
+        else res.status(200).send('KOM Segment added')
+      }
+    }
+  } else { // KOM else
+    if (!segment_name, !zi_link, !world_id, !length, !type) res.status(400).send('Invalid request - Required fields not entered')
+    else {
       let sprintIdQuery  = `SELECT MAX(strava_id) FROM public."Segments"
         WHERE strava_id < 10000`
-
+        
       const data = await runQuery(sprintIdQuery)
-      let sprintId = Number(data[0]) + 1
+      if (data.error)  res.status(500).send({data, table: 'Segments'})
+      else {
+        let sprintId = Number(data[0]['max']) + 1
+        const sprintQuery = `INSERT INTO public."Segments" (strava_id, segment_name, zi_link, world_id, length, ele_gain, grade, climb_cat, type, created_at, updated_at)
+          VALUES (${sprintId},
+            '${segment_name}',
+            '${zi_link}',
+            ${world_id},
+            ${Number(length).toFixed(2)},
+            ${Math.floor(ele_gain)},
+            ${avg_grade ? avg_grade : 0},
+            'S',
+            'sprint',
+            NOW(),
+            NOW());`
 
-      const sprintQuery = `INSERT INTO public."Segments" ( strava_id, segment_name, zi_link, world_id, length, ele_gain, grade, climb_cat, type, createdAt, updatedAt)
-        VALUES (${sprintId},
-          ${segment_name},
-          ${zi_link},
-          ${world_id},
-          ${length},
-          ${ele_gain},
-          ${avg_grade ? avg_grade : 0},
-          'S',
-          'sprint',
-          NOW(),
-          NOW());`
-
-      await runQuery(sprintQuery)
-      
+        let result = await runQuery(sprintQuery)
+        if (result.error) res.status(500).send({result, table: 'Zwift_PRs'})
+        else res.status(200).send('Sprint Segment added')
+      }
     }
-    res.status(200).send('Route added')
+  }
   // Do not seed the tables, seed in bulk due to API call restrictions
 })
 
@@ -154,35 +172,105 @@ router.put('/:id', async (req,res) => {
   const { segment_name, zi_link, world_id, length, ele_gain, type } = req.body
 
   //  Get data from the database
-  const selectQuery = `SELECT * FROM public."Routes"
-  WHERE strava_id = ${id}`
+  const selectQuery = `SELECT length, ele_gain, type FROM public."Segments"
+    WHERE strava_id = ${id}`
 
-  const currData = runQuery(selectQuery)
+  const currData = await runQuery(selectQuery)
+  if (currData.error) res.status(500).send({currData, table: 'Segments'})
+  else {
   const dataMap = generateMap(currData[0])
 
-  let newLength = length || dataMap.get('length')
-  let newEle = ele_gain || dataMap.get('ele_gain')
-  let newGrade = calcAvgGrade(newLength, newEle)
-  let newCat = calcClimbCat(newLength, newEle)
+  const currLen = dataMap.get('length')
+  const currEle = dataMap.get('ele_gain')
+  const currType = dataMap.get('type')
 
-  // update the segments table
-  const updateQuery = `UPDATE public."Routes"
-    SET segment_name = ${segment_name ? segment_name : dataMap.get('segment_name')},
-      zi_link = ${zi_link ? zi_link : dataMap.get('zi_link')},
-      world_id = ${world_id ? world_id : dataMap.get('world_id')},
-      length = ${length ? length : dataMap.get('length')},
-      ele_gain = ${ele_gain ? ele_gain : dataMap.get('ele_gain')},
-      type = ${type ? type : dataMap('type')},
-      grade = ${newGrade},
-      climb_cat = ${newCat},
-      updatedAt = NOW()
-    WHERE strava_id = ${id};`
+  let newLen
+  let newEle
+  let newCat
+  let newGrade
 
-  await runQuery(updateQuery)
-  res.status(200).send('Complete')
+  //  Build the update query
+  let updateQuery = `UPDATE public."Segments"
+    SET updated_at = NOW()`
 
-  
+  if (segment_name !== undefined) {
+    updateQuery = `${updateQuery},
+    segment_name = '${segment_name}'`
+  }
+  if (zi_link !== undefined) {
+    updateQuery = `${updateQuery},
+    zi_link = '${zi_link}'`
+  }
+  if (world_id !== undefined) {
+    updateQuery = `${updateQuery},
+    world_id = '${world_id}'`
+  }
+  if (length !== undefined) {
+    updateQuery = `${updateQuery},
+    length = '${Number(length).toFixed(2)}'`
+    newLen = length
+  } else {
+    newLen = currLen
+  }
+  if (ele_gain !== undefined) {
+    updateQuery = `${updateQuery},
+    ele_gain = '${Math.floor(ele_gain)}'`
+    newEle = ele_gain
+  } else {
+    newEle = currEle
+  }
+  if (type !== undefined) {
+    updateQuery = `${updateQuery},
+    type = '${type}'`
+  }
+  if (type === 'kom') {
+    newCat = calcClimbCat(newLen, newEle)
+    newGrade = calcAvgGrade(newLen, newEle)
+    updateQuery =  `${updateQuery},
+    climb_cat = '${newCat}',
+    grade = ${newGrade}`
+  } else {
+    newCat = 'S'
+    newGrade = 0
+    updateQuery =  `${updateQuery},
+    climb_cat = '${newCat}',
+    grade = ${newGrade}`
+  }
+
+  // Add WHERE clause
+  updateQuery = `${updateQuery}
+  WHERE strava_id = ${id};`
+
+
+  let result = await runQuery(updateQuery)
+  if (result.error) res.status(500).send({result, table: 'Segments'})
+    else {
+      if (type === 'sprint' && currType === 'kom') {
+        // delete Zwift_Pr and Yearly_Pr record
+        const deleteZwiftQuery = `DELETE FROM public."Yearly_PRs" 
+          WHERE strava_id = ${id};`
+        await runQuery(deleteZwiftQuery)
+
+        const deleteYearlyQuery = `DELETE FROM public."Yearly_PRs" 
+         WHERE strava_id = ${id};`
+        await runQuery(deleteYearlyQuery)
+
+        res.status(200).send('Complete')
+      } else if (type === 'kom' && currType === 'sprint'){
+        // create Zwift_Pr record 
+        const prQuery = `INSERT INTO public."Zwift_PRs" (strava_id, type, created_at, updated_at)
+          VALUES (${id},
+            'segment',
+            NOW(),
+            NOW());`
+        result = await runQuery(prQuery)
+        if (result.error) res.status(500).send({result, table: 'Zwift_PRs'})
+        else res.status(200).send('Complete')
+      } else res.status(200).send('Complete')  
+    }
+  }
 })
+
 // Edit strava id on the segment - ONLY can be edited on the STRAVA ID - CASCADE to PR tables
 router.put('/strava/:id', async (req,res) => {
   const { id } = req.params

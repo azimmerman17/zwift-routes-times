@@ -28,6 +28,7 @@ async function runQuery(queryString) {
     }
   } catch (error) {
     console.error(error)
+    console.log(error)
     // close the connection
     client.end() 
     // return the error

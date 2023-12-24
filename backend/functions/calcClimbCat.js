@@ -1,7 +1,10 @@
 // calculates the catagory of a climb
+
+const calcAvgGrade = require("./calcAvgGrade")
+
 // rules must be over 300m with average 3.0%
 function calcClimbCat(l, e) {
-  let grade = calcClimbCat(l, e)
+  let grade = calcAvgGrade(l, e)
   l = l * 1000
   if (l < 300 || grade < 3.0) return 'NC'
   // calc the catagory length(m) * average Grade
