@@ -17,39 +17,62 @@ router.post('/seed_prs', async (req, res) => {
   let activityCount = 0   // total number of activities processed
   let segmentCount = 0    // total number of segments processed
   let countUpdated = 0    // total number of segment effort counts updated
+  let segmentCountNotTracked = 0
+  let segmentCountNotTrackedMissed = 0
 
   // Step 1 - Retrieve Access Token
   console.log('Step 1 - Retrieve Access Token')
-  const access_token = await getAccessToken()
+  await getAccessToken()
   console.log('\nRetrieved Access token\n')
-  // console.log('Retrieved Access token\n', access_token)    // testing ONLY
+  // testing ONLY
+  const access_token = await getAccessToken()
+  // console.log('Retrieved Access token\n', access_token, process.env.ACCESS_TOKEN)   
   
-  
-  // Step 2 - Get all Strava activities and create a list of activity id's of Virtual Rides
+  // Step 2 - Get all Strava activities and create a list of activity id's of Virtual Rides 
   console.log('Step 2 - Get all Strava activities and create a list of activity id\'s of Virtual Rides')
-  let activityList = await getActivitiesList(access_token)
+  let activityList = await getActivitiesList()
   activityCount = activityList.length
   console.log(activityList)
 
+  // Step 2.1 - Get a list of all tracked segments
+  console.log('Step 2.1 - Get a list of all tracked segments')
+  let trackedSegmentsQuery = `SELECT strava_id FROM public."Zwift_PRs"`
+  
+  //run the Query
+  const trackedSegments = await runQuery(trackedSegmentsQuery)
+
+  let trackedSegmentsList = []
+  trackedSegments.forEach(segment => {
+    const { strava_id } = segment
+    trackedSegmentsList.push(strava_id)
+  });
+
   // Step 3 - Get and process each activity data from Strava API and update Zwift_PR and Yearly PR tables
-  console.log(`Step 3 - Get and process each activity data from Strava API and update Zwift_PR and Yearly PR tables\nEstimated time ${activityCount / 3.5} minutes`)
+  console.log(`Step 3 - Get and process each activity data from Strava API and update Zwift_PR and Yearly PR tables`)
   // for (let i = 0; i < activityList.length; i++) {
   for (let i = 0; i < activityList.length; i++) {
-    // Step 3 Part 1 - Get the activity data from Strava
+    // Step 3.1 - Get the activity data from Strava
     console.log(`Processing activity ${i + 1} of ${activityList.length}; Activity: ${activityList[i]}`)
-    const activityData = await getActivityData(access_token, activityList[i])
+    const activityData = await getActivityData(activityList[i])
     const { segment_efforts } = activityData
     segmentCount += segment_efforts.length
-    console.log('\neffortCount:', segment_efforts.length,'\nsegmentId:', activityList[i])
+    console.log('\neffortCount:', segment_efforts.length,'\n Activity:', activityList[i])
 
-    // Step 3 Part 2 - Loop through the activities segment efforts and process each segment
+    // Step 3.2 - Loop through the activities segment efforts and process each segment
     for (let j = 0; j < segment_efforts.length; j++) {
       const { elapsed_time, start_date, segment } = segment_efforts[j]
       const effort_date = translateDate(start_date.split('T')[0])
       const effort_id = segment_efforts[j].id
       const { id } = segment
 
-      // Step 3 Part 3 - Check the Zwift_PR Table to see if the segement is tracked
+      // Step 3.3 - Check the Zwift_PR Table to see if the segement is tracked
+      if (!trackedSegmentsList.includes(String(id))) {
+        // if the id is not in the list, the segment is not tracked
+        console.log(`Segment ${id} is not tracked`)
+        segmentCountNotTracked += 1
+        continue
+      }
+
       // Query to get the PR data from the Zwift_PR table
       const prQuery = `SELECT * FROM public."Zwift_PRs"
       WHERE strava_id = ${id}
@@ -57,15 +80,18 @@ router.post('/seed_prs', async (req, res) => {
 
       //run the prQuery
       const prData = await runQuery(prQuery)
-      
+
+      // Double check on if the segment is tracked
       if (prData === null) {
-        // if prData is null, the segment is not tracked
-        console.log(`Segment ${id} is not tracked`)
+        // if there is no prData, the segment is not tracked
+        console.log(`Segment ${id} is not tracked - Double Check`)
+        segmentCountNotTrackedMissed += 1
         continue
       }
-      // Step 3 Part 4 - Create map with returned data and set varibles for update query
+
+      // Step 3.4 - Create map with returned data and set varibles for update query
       const prMap = generateMap(prData[0])
-      console.log(prMap)
+      // console.log(prMap)
 
       // Varables for update query
       const pr_time = prMap.get('pr_time')
@@ -83,10 +109,10 @@ router.post('/seed_prs', async (req, res) => {
         last_effort_date = '${effort_date}',
         updated_at = NOW()
       WHERE strava_id = ${id}`
-      console.log('\nUPDATE QUERY\n', effortDateQuery)
+      // console.log('\nUPDATE QUERY\n', effortDateQuery)
       await runQuery(effortDateQuery)
 
-      // Step 3 Part 5 - Validate if effort is already in a Top 3 PR, and update table appropriately
+      // Step 3.5 - Validate if effort is already in a Top 3 PR, and update table appropriately
       if (pr_effort_id == effort_id || silver_effort_id == effort_id || bronze_effort_id == effort_id) {
         // Check if the effort is already on PR table - if yes only update last effort data
         console.log('Effort is already a PR')
@@ -105,8 +131,9 @@ router.post('/seed_prs', async (req, res) => {
             bronze_effort_id = ${silver_effort_id},
             updated_at = NOW()
           WHERE strava_id = ${id}`
-          console.log('\nUPDATE QUERY\n', updateQuery)
+          // console.log('\nUPDATE QUERY\n', updateQuery)
           await runQuery(updateQuery)
+          console.log('Zwift PR Updated')
       } else if (!silver_time || silver_time > elapsed_time) {
         // update table if the effort is a second best PR
         console.log('New Silver')
@@ -119,7 +146,7 @@ router.post('/seed_prs', async (req, res) => {
           bronze_effort_id = ${silver_effort_id},
           updated_at = NOW()
         WHERE strava_id = ${id}`
-        console.log('\nUPDATE QUERY\n', updateQuery)
+        // console.log('\nUPDATE QUERY\n', updateQuery)
         await runQuery(updateQuery)
         console.log('Zwift PR Updated')
       } else if (!bronze_time || bronze_time > elapsed_time) {
@@ -131,34 +158,35 @@ router.post('/seed_prs', async (req, res) => {
           bronze_effort_id = ${effort_id},
           updated_at = NOW()
         WHERE strava_id = ${id}`
-        console.log('\nUPDATE QUERY\n', updateQuery)
+        // console.log('\nUPDATE QUERY\n', updateQuery)
         await runQuery(updateQuery)
+        console.log('Zwift PR Updated')
       } else {
-        console.log('\nNot a new benchmark')
+        console.log('Not a new benchmark')
       }
-      // Step 3 Part 6 - Validate if effort is already in the Yearly_PR Table
+      // Step 3.6 - Validate if effort is already in the Yearly_PR Table
       console.log('\nMoving to the YEARLY_PR Table')
       // Check if the Segment is already on the Yearly_PR table
       let year = Number(effort_date.split('-')[0])
       const yearQuery = `SELECT * FROM public."Yearly_PRs"
       WHERE strava_id = ${id}
         AND year = ${year}`
-      console.log('\nYEARLY PR QUERY\n', yearQuery)
+      // console.log('\nYEARLY PR QUERY\n', yearQuery)
 
       const yearlyData = await runQuery(yearQuery)
-      console.log('\nYEARLY_PR', yearlyData)
+      // console.log('\nYEARLY_PR', yearlyData)
 
       if (yearlyData === null) {
         // If data is null, INSERT a new row
         console.log(`First PR for Strava Segment, ${id} in year, ${year}`)
         const insertQuery = `INSERT INTO public."Yearly_PRs" (strava_id, year, pr_time, pr_date, pr_effort_id, created_at, updated_at)
           VALUES (${id}, ${year}, ${elapsed_time}, '${effort_date}', ${effort_id}, NOW(), NOW())`
-        console.log('\nINSERT QUERY\n', insertQuery)
+        // console.log('\nINSERT QUERY\n', insertQuery)
         await runQuery(insertQuery)
       } else {
         // If exist on table, check if time is a new PR
         const yearMap = generateMap(yearlyData[0])
-        console.log('\nZWIFT_PR DATA\n', yearMap)
+        // console.log('\nZWIFT_PR DATA\n', yearMap)
         if (elapsed_time < yearMap.get('pr_time')) {
           console.log(`New PR for Strava Segment, ${id} in year, ${year}`)
           updateQuery = `UPDATE public."Yearly_PRs"
@@ -168,8 +196,10 @@ router.post('/seed_prs', async (req, res) => {
               updated_at = NOW()
             WHERE strava_id = ${id}
               AND year = ${year}`
-          console.log('\nYEARLY PR Upate Query\n', updateQuery)
+          // console.log('\nYEARLY PR Upate Query\n', updateQuery)
           await runQuery(updateQuery)
+          console.log('Yearly PR Updated')
+
         } else {
           console.log('Effort is not a new PR')
         }
@@ -178,7 +208,7 @@ router.post('/seed_prs', async (req, res) => {
       console.log(`Processing of segment ${j + 1} of ${segment_efforts.length} - Complete`)
     }       // end segment loop
 
-    // Step 3 Part 7 - Pause for Rate Limit
+    // Step 3.7 - Pause for Rate Limit
     // pause process due to Strava Rate Limits - 1000 per day, 100 per 15 minutes - only process a max of 60 over the 15 minutes 
     console.log(`Processing activity ${i + 1} of ${activityList.length}; Activity: ${activityList[i]} - Completed`)
     console.log('Pausing for 15 seconds due to Strava API call limits')
@@ -187,7 +217,7 @@ router.post('/seed_prs', async (req, res) => {
 
 
   // Step 4 - Update the Segment Effort Counts
-  // Step 4 Part 1- Get a list of strava_ids with PR data attached
+  // Step 4.1- Get a list of strava_ids with PR data attached
   const selectQuery = `SELECT A.strava_id
   FROM public."Zwift_PRs" A
   WHERE A.pr_time is not null`
@@ -196,24 +226,24 @@ router.post('/seed_prs', async (req, res) => {
   countUpdated = segmentList.length
   console.log(`${countUpdated} segments that need to be updated `)
   
-  // Step 4 Part 2 - Loop through the rows to get a segment effort count
+  // Step 4.2 - Loop through the rows to get a segment effort count
   for (let k = 0; k < segmentList.length; k++) {
     let stravaId = segmentList[k][`strava_id`]
-    const segmentData = await getSegmentData(stravaId, access_token)
+    const segmentData = await getSegmentData(stravaId)
     const { athlete_segment_stats } = segmentData
     const { effort_count } = athlete_segment_stats
-    console.log('\n Athlete Stats\n', athlete_segment_stats)
+    // console.log('\n Athlete Stats\n', athlete_segment_stats)
 
-    // Step 4 Part 3 - Update the Zwift_PR Table
+    // Step 4.3 - Update the Zwift_PR Table
     const updateQuery = `UPDATE public."Zwift_PRs"
       SET count = ${effort_count},
         updated_at = NOW()
       WHERE strava_id = ${stravaId}`
 
-    console.log('\nYEARLY PR Upate Query - Updating Count\n', updateQuery)
+    // console.log('\nYEARLY PR Upate Query - Updating Count\n', updateQuery)
     await runQuery(updateQuery)
 
-    // Step 4 Part 4 = Pause for Rate Limit
+    // Step 4.4 = Pause for Rate Limit
     console.log(`Updated Count for Segment ${stravaId} - Segment ${k + 1} of ${countUpdated}`)
     console.log('Pausing for 15 seconds due to Strava API call limits')
     await new Promise(r => setTimeout(r, 15000));
@@ -228,7 +258,9 @@ router.post('/seed_prs', async (req, res) => {
   res.send({
     activityCount,
     segmentCount,
-    countUpdated
+    countUpdated,
+    segmentCountNotTracked,
+    segmentCountNotTrackedMissed
   })
 })
 

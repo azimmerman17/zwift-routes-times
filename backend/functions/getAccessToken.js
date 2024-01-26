@@ -1,5 +1,6 @@
 // get the access token to get activity efforts
 const axios = require('axios')
+const stravaAPICall = require('./stravaAPICall')
 require('dotenv').config()
 
 async function getAccessToken() {
@@ -26,13 +27,16 @@ async function getAccessToken() {
   }
 
   try {
-    const response = await axios.post(url, options) 
-    const { data } = response
+    const data = await stravaAPICall(url, options, 'POST')
+
+    // const response = await axios.post(url, options) 
+    // const { data } = response
     const { access_token } = data
-    return access_token
+    process.env.ACCESS_TOKEN = access_token
+    // return access_token
   } catch (error) {
     console.log(error)
-    return error
+    // return error
   }
 }
 

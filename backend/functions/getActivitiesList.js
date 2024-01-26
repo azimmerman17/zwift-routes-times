@@ -1,7 +1,8 @@
 // get a list of activities 
 const axios = require('axios')
+const stravaAPICall = require('./stravaAPICall')
 
-async function getActivitiesList(access_token) {
+async function getActivitiesList() {
   let activityList = []
   let flag = 1            // flag to end the loop
   let page = 1            // start page for the Strava API calls
@@ -10,7 +11,7 @@ async function getActivitiesList(access_token) {
   const options = {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${access_token}`
+        Authorization: `Bearer ${process.env.ACCESS_TOKEN}`
       },
       redirect: 'follow'
   }
@@ -19,8 +20,9 @@ async function getActivitiesList(access_token) {
   while (flag === 1) {
     let url = `https://www.strava.com/api/v3/activities/?page=${page}&per_page=${per_page}`
     try {
-      const response = await axios.get(url, options) 
-      const { data } = response
+      const data = await stravaAPICall(url, options, 'GET')
+      // const response = await axios.get(url, options) 
+      // const { data } = response
       data.forEach(record => {
         const { type, id, name, external_id } = record
         let add = 0
